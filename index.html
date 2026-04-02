@@ -1,0 +1,26 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Driving Sandbox</title>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <canvas id="gameCanvas"></canvas>
+
+    <div class="hud">
+      <div class="hud-card">
+        <div class="label">Driving Sandbox</div>
+        <h1>Spiral Tower Test</h1>
+        <p>Use WASD or arrow keys to drive. Hold space to drift and lay down skid marks. The track spirals upward into a tower, then exits into a gentle downhill straight. Press R to reset.</p>
+      </div>
+      <div class="stats">
+        <div class="stat">Speed <strong id="speedValue">0 mph</strong></div>
+        <div class="stat">Heading <strong id="headingValue">0</strong></div>
+      </div>
+    </div>
+
+    <script type="module" src="main.js"></script>
+  </body>
+</html>
