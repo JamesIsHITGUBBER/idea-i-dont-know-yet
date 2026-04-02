@@ -44,62 +44,211 @@ const CAR_BODY_HEIGHT = 4.8;
 const TRACK_HALF_WIDTH = TRACK_WIDTH / 2;
 const ROAD_SURFACE_MARGIN = 2;
 const wallColliders = [];
-const trackSamples = [];
-const leftWallSamples = [];
-const rightWallSamples = [];
+const trackSections = [];
+const trackSectionMeta = [];
+const leftWallSections = [];
+const rightWallSections = [];
+const wallSectionInsets = [];
 
-function buildTrackSamples() {
-  const samples = [];
-  const center = new THREE.Vector2(-120, 0);
-  const turns = 2.35;
-  const spiralSteps = 260;
-  const startAngle = Math.PI * 0.92;
-  const endAngle = startAngle + Math.PI * 2 * turns;
-  const startRadius = 330;
-  const endRadius = 120;
-  const towerHeight = 165;
-
-  for (let index = 0; index <= spiralSteps; index += 1) {
-    const t = index / spiralSteps;
-    const angle = THREE.MathUtils.lerp(startAngle, endAngle, t);
-    const radius = THREE.MathUtils.lerp(startRadius, endRadius, t);
-    samples.push(
-      new THREE.Vector3(
-        center.x + Math.cos(angle) * radius,
-        0.03 + towerHeight * t,
-        center.y + Math.sin(angle) * radius,
-      ),
-    );
+function pushSectionPoint(section, point) {
+  const previous = section[section.length - 1];
+  if (!previous || previous.distanceTo(point) > 0.001) {
+    section.push(point);
   }
-
-  const top = samples[samples.length - 1];
-  const topPrev = samples[samples.length - 2];
-  const exitDirection = new THREE.Vector3(top.x - topPrev.x, 0, top.z - topPrev.z).normalize();
-  const straightLength = 1100;
-  const downhillDrop = 125;
-  const straightSteps = 96;
-
-  for (let index = 1; index <= straightSteps; index += 1) {
-    const t = index / straightSteps;
-    const smooth = t * t * (3 - 2 * t);
-    samples.push(
-      new THREE.Vector3(
-        top.x + exitDirection.x * straightLength * t,
-        THREE.MathUtils.lerp(top.y, Math.max(0.03, top.y - downhillDrop), smooth),
-        top.z + exitDirection.z * straightLength * t,
-      ),
-    );
-  }
-
-  return samples;
 }
 
-trackSamples.push(...buildTrackSamples());
+function addStraight(section, start, end, steps) {
+  for (let index = section.length === 0 ? 0 : 1; index <= steps; index += 1) {
+    const t = index / steps;
+    pushSectionPoint(section, start.clone().lerp(end, t));
+  }
+}
 
-function getTrackTangent(index) {
-  const previous = trackSamples[Math.max(0, index - 1)];
-  const next = trackSamples[Math.min(trackSamples.length - 1, index + 1)];
-  return next.clone().sub(previous).normalize();
+function addArc(section, center, radius, startAngle, endAngle, yStart, yEnd, steps) {
+  for (let index = section.length === 0 ? 0 : 1; index <= steps; index += 1) {
+    const t = index / steps;
+    const angle = THREE.MathUtils.lerp(startAngle, endAngle, t);
+    pushSectionPoint(
+      section,
+      new THREE.Vector3(
+        center.x + Math.cos(angle) * radius,
+        THREE.MathUtils.lerp(yStart, yEnd, t),
+        center.z + Math.sin(angle) * radius,
+      ),
+    );
+  }
+}
+
+function addSpiral(section, center, startRadius, endRadius, startAngle, endAngle, yStart, yEnd, steps) {
+  for (let index = section.length === 0 ? 0 : 1; index <= steps; index += 1) {
+    const t = index / steps;
+    const angle = THREE.MathUtils.lerp(startAngle, endAngle, t);
+    const radius = THREE.MathUtils.lerp(startRadius, endRadius, t);
+    pushSectionPoint(
+      section,
+      new THREE.Vector3(
+        center.x + Math.cos(angle) * radius,
+        THREE.MathUtils.lerp(yStart, yEnd, t),
+        center.z + Math.sin(angle) * radius,
+      ),
+    );
+  }
+}
+
+function addTurn(section, radius, angleDelta, yStart, yEnd, steps) {
+  const start = section[section.length - 1];
+  const tangent = getTrackTangent(section, section.length - 1).setY(0).normalize();
+  const right = new THREE.Vector3(-tangent.z, 0, tangent.x);
+  const turnSign = Math.sign(angleDelta) || 1;
+  const center = start.clone().addScaledVector(right, radius * turnSign);
+  const startAngle = Math.atan2(start.z - center.z, start.x - center.x);
+  addArc(section, center, radius, startAngle, startAngle + angleDelta, yStart, yEnd, steps);
+}
+
+function buildTrackSections() {
+  const mainSection = [];
+  const underpassSection = [];
+
+  addStraight(mainSection, new THREE.Vector3(-1420, 0.03, -120), new THREE.Vector3(-1080, 0.03, -120), 72);
+  addTurn(mainSection, 250, Math.PI / 2, 0.03, 0.03, 54);
+  addStraight(mainSection, mainSection[mainSection.length - 1], new THREE.Vector3(-840, 0.03, 260), 36);
+  addTurn(mainSection, 240, -Math.PI / 2, 0.03, 40, 52);
+  addStraight(mainSection, mainSection[mainSection.length - 1], new THREE.Vector3(120, 40, 470), 104);
+  addTurn(mainSection, 320, -Math.PI / 2, 40, 52, 64);
+  addStraight(mainSection, mainSection[mainSection.length - 1], new THREE.Vector3(520, 52, 900), 44);
+  addSpiral(mainSection, new THREE.Vector3(620, 0.03, 980), 230, 170, Math.PI, Math.PI * 3.3, 52, 128, 188);
+  addTurn(mainSection, 340, -Math.PI / 2, 128, 96, 60);
+  addStraight(mainSection, mainSection[mainSection.length - 1], new THREE.Vector3(1720, 96, 1640), 96);
+
+  addStraight(underpassSection, new THREE.Vector3(380, 0.03, 980), new THREE.Vector3(860, 0.03, 980), 52);
+
+  trackSectionMeta.push(
+    {
+      wallStartInset: 0,
+      wallEndInset: 0,
+    },
+    {
+      wallStartInset: 0,
+      wallEndInset: 0,
+    },
+  );
+
+  return [mainSection, underpassSection];
+}
+
+trackSections.push(...buildTrackSections());
+
+function getPlanarDirection(section, index, radius = 3) {
+  const direction = new THREE.Vector2();
+
+  for (let offset = -radius; offset <= radius; offset += 1) {
+    const startIndex = THREE.MathUtils.clamp(index + offset, 0, section.length - 2);
+    const endIndex = startIndex + 1;
+    const start = section[startIndex];
+    const end = section[endIndex];
+    direction.x += end.x - start.x;
+    direction.y += end.z - start.z;
+  }
+
+  if (direction.lengthSq() < 0.0001) {
+    return new THREE.Vector2(1, 0);
+  }
+
+  return direction.normalize();
+}
+
+function getTrackTangent(section, index) {
+  const planarDirection = getPlanarDirection(section, index, 3);
+  const previous = section[Math.max(0, index - 2)];
+  const next = section[Math.min(section.length - 1, index + 2)];
+  const yDelta = next.y - previous.y;
+  const horizontalLength = Math.max(0.001, Math.hypot(next.x - previous.x, next.z - previous.z));
+  return new THREE.Vector3(planarDirection.x, yDelta / horizontalLength, planarDirection.y).normalize();
+}
+
+function getTrackOffsetRight(section, index) {
+  const forward = getPlanarDirection(section, index, 4);
+  return new THREE.Vector3(-forward.y, 0, forward.x).normalize();
+}
+
+function intersectOffsetLines(startA, endA, startB, endB) {
+  const directionA = endA.clone().sub(startA);
+  const directionB = endB.clone().sub(startB);
+  const denominator = directionA.x * directionB.y - directionA.y * directionB.x;
+
+  if (Math.abs(denominator) < 0.0001) {
+    return null;
+  }
+
+  const delta = startB.clone().sub(startA);
+  const t = (delta.x * directionB.y - delta.y * directionB.x) / denominator;
+  return startA.clone().add(directionA.multiplyScalar(t));
+}
+
+function buildOffsetSamples(section, offsetDistance) {
+  if (section.length < 2) {
+    return section.map((point) => point.clone());
+  }
+
+  const segmentData = [];
+  for (let index = 0; index < section.length - 1; index += 1) {
+    const start = section[index];
+    const end = section[index + 1];
+    const planar = new THREE.Vector2(end.x - start.x, end.z - start.z);
+    if (planar.lengthSq() < 0.0001) {
+      continue;
+    }
+
+    planar.normalize();
+    const right = new THREE.Vector2(-planar.y, planar.x);
+    segmentData.push({
+      start,
+      end,
+      right,
+      offsetStart: new THREE.Vector2(start.x, start.z).addScaledVector(right, offsetDistance),
+      offsetEnd: new THREE.Vector2(end.x, end.z).addScaledVector(right, offsetDistance),
+    });
+  }
+
+  if (segmentData.length === 0) {
+    return section.map((point) => point.clone());
+  }
+
+  const offsetSamples = [];
+  for (let index = 0; index < section.length; index += 1) {
+    let xz;
+
+    if (index === 0) {
+      xz = segmentData[0].offsetStart.clone();
+    } else if (index === section.length - 1) {
+      xz = segmentData[segmentData.length - 1].offsetEnd.clone();
+    } else {
+      const previousSegment = segmentData[Math.max(0, index - 1)];
+      const nextSegment = segmentData[Math.min(segmentData.length - 1, index)];
+      const intersection = intersectOffsetLines(
+        previousSegment.offsetStart,
+        previousSegment.offsetEnd,
+        nextSegment.offsetStart,
+        nextSegment.offsetEnd,
+      );
+
+      if (intersection) {
+        const center = new THREE.Vector2(section[index].x, section[index].z);
+        const maxOffset = Math.abs(offsetDistance) + TRACK_HALF_WIDTH * 0.35;
+        if (intersection.distanceTo(center) <= maxOffset) {
+          xz = intersection;
+        }
+      }
+
+      if (!xz) {
+        xz = previousSegment.offsetEnd.clone().lerp(nextSegment.offsetStart, 0.5);
+      }
+    }
+
+    offsetSamples.push(new THREE.Vector3(xz.x, section[index].y, xz.y));
+  }
+
+  return offsetSamples;
 }
 
 function addOrientedSegment3D({
@@ -111,70 +260,76 @@ function addOrientedSegment3D({
   yOffset = 0,
   target = scene,
 }) {
-  const direction = end.clone().sub(start);
-  const length = direction.length();
+  const flatDirection = new THREE.Vector3(end.x - start.x, 0, end.z - start.z);
+  const length = flatDirection.length();
   if (length < 0.001) {
     return;
   }
 
   const mesh = new THREE.Mesh(new THREE.BoxGeometry(length, height, thickness), material);
-  const quaternion = new THREE.Quaternion().setFromUnitVectors(
-    new THREE.Vector3(1, 0, 0),
-    direction.clone().normalize(),
+  mesh.position.set(
+    (start.x + end.x) * 0.5,
+    (start.y + end.y) * 0.5 + height * 0.5 + yOffset,
+    (start.z + end.z) * 0.5,
   );
-  const upOffset = new THREE.Vector3(0, height * 0.5 + yOffset, 0).applyQuaternion(quaternion);
-  mesh.position.copy(start).add(end).multiplyScalar(0.5).add(upOffset);
-  mesh.quaternion.copy(quaternion);
+  mesh.rotation.y = Math.atan2(flatDirection.z, flatDirection.x);
   target.add(mesh);
 }
 
-const roadVertices = [];
-const roadIndices = [];
-for (let index = 0; index < trackSamples.length; index += 1) {
-  const centerPoint = trackSamples[index];
-  const tangent = getTrackTangent(index);
-  const right = new THREE.Vector3(-tangent.z, 0, tangent.x).normalize();
-  const leftEdge = centerPoint.clone().addScaledVector(right, -TRACK_HALF_WIDTH);
-  const rightEdge = centerPoint.clone().addScaledVector(right, TRACK_HALF_WIDTH);
-  const leftWall = centerPoint.clone().addScaledVector(right, -(TRACK_HALF_WIDTH + WALL_THICKNESS * 0.5));
-  const rightWall = centerPoint.clone().addScaledVector(right, TRACK_HALF_WIDTH + WALL_THICKNESS * 0.5);
+const roadGroup = new THREE.Group();
+for (const section of trackSections) {
+  const sectionMeta = trackSectionMeta[leftWallSections.length] || { wallStartInset: 0, wallEndInset: 0 };
+  const roadVertices = [];
+  const roadIndices = [];
+  const leftEdgeSamples = buildOffsetSamples(section, -TRACK_HALF_WIDTH);
+  const rightEdgeSamples = buildOffsetSamples(section, TRACK_HALF_WIDTH);
+  const leftWallSamples = buildOffsetSamples(section, -(TRACK_HALF_WIDTH + WALL_THICKNESS * 0.5));
+  const rightWallSamples = buildOffsetSamples(section, TRACK_HALF_WIDTH + WALL_THICKNESS * 0.5);
 
-  leftWallSamples.push(leftWall);
-  rightWallSamples.push(rightWall);
-  roadVertices.push(leftEdge.x, leftEdge.y, leftEdge.z, rightEdge.x, rightEdge.y, rightEdge.z);
+  for (let index = 0; index < section.length; index += 1) {
+    const leftEdge = leftEdgeSamples[index];
+    const rightEdge = rightEdgeSamples[index];
+    roadVertices.push(leftEdge.x, leftEdge.y, leftEdge.z, rightEdge.x, rightEdge.y, rightEdge.z);
 
-  if (index < trackSamples.length - 1) {
-    const base = index * 2;
-    roadIndices.push(base, base + 1, base + 2, base + 1, base + 3, base + 2);
+    if (index < section.length - 1) {
+      const base = index * 2;
+      roadIndices.push(base, base + 1, base + 2, base + 1, base + 3, base + 2);
+    }
   }
+
+  leftWallSections.push(leftWallSamples);
+  rightWallSections.push(rightWallSamples);
+  wallSectionInsets.push({ start: sectionMeta.wallStartInset || 0, end: sectionMeta.wallEndInset || 0 });
+
+  const roadGeometry = new THREE.BufferGeometry();
+  roadGeometry.setAttribute("position", new THREE.Float32BufferAttribute(roadVertices, 3));
+  roadGeometry.setIndex(roadIndices);
+  roadGeometry.computeVertexNormals();
+  roadGroup.add(
+    new THREE.Mesh(
+      roadGeometry,
+      new THREE.MeshStandardMaterial({ color: 0x7f909f, roughness: 0.96, metalness: 0.02 }),
+    ),
+  );
 }
-
-const roadGeometry = new THREE.BufferGeometry();
-roadGeometry.setAttribute("position", new THREE.Float32BufferAttribute(roadVertices, 3));
-roadGeometry.setIndex(roadIndices);
-roadGeometry.computeVertexNormals();
-
-const road = new THREE.Mesh(
-  roadGeometry,
-  new THREE.MeshStandardMaterial({ color: 0x7f909f, roughness: 0.96, metalness: 0.02 }),
-);
-scene.add(road);
+scene.add(roadGroup);
 
 const laneStripeMaterial = new THREE.MeshStandardMaterial({ color: 0xf3f7fb, roughness: 0.7, flatShading: true });
-for (let index = 0; index < trackSamples.length - 10; index += 14) {
-  addOrientedSegment3D({
-    start: trackSamples[index],
-    end: trackSamples[Math.min(trackSamples.length - 1, index + 7)],
-    thickness: 1.2,
-    height: 0.08,
-    material: laneStripeMaterial,
-    yOffset: 0.04,
-  });
+for (const section of trackSections) {
+  for (let index = 0; index < section.length - 10; index += 14) {
+    addOrientedSegment3D({
+      start: section[index],
+      end: section[Math.min(section.length - 1, index + 7)],
+      thickness: 1.2,
+      height: 0.08,
+      material: laneStripeMaterial,
+      yOffset: 0.04,
+    });
+  }
 }
 
 const wallGroup = new THREE.Group();
 const wallMaterial = new THREE.MeshStandardMaterial({ color: 0xf4f7fb, roughness: 0.92, flatShading: true });
-const wallStripeMaterial = new THREE.MeshStandardMaterial({ color: 0x5ccfc0, roughness: 0.55, flatShading: true });
 
 function addWallVisualSegment(start, end) {
   addOrientedSegment3D({
@@ -185,20 +340,13 @@ function addWallVisualSegment(start, end) {
     material: wallMaterial,
     target: wallGroup,
   });
-
-  addOrientedSegment3D({
-    start,
-    end,
-    thickness: WALL_THICKNESS,
-    height: 2.1,
-    material: wallStripeMaterial,
-    yOffset: WALL_HEIGHT - 3.6 - 1.05,
-    target: wallGroup,
-  });
 }
 
-function addWallRun(samples) {
-  for (let index = 0; index < samples.length - 1; index += 1) {
+function addWallRun(samples, startInset = 0, endInset = 0) {
+  const startIndex = Math.max(0, startInset);
+  const endIndex = Math.max(startIndex, samples.length - 1 - Math.max(0, endInset));
+
+  for (let index = startIndex; index < endIndex; index += 1) {
     addWallCollider(samples[index], samples[index + 1]);
     addWallVisualSegment(samples[index], samples[index + 1]);
   }
@@ -213,28 +361,14 @@ function addWallCollider(start, end) {
   });
 }
 
-addWallRun(leftWallSamples);
-addWallRun(rightWallSamples);
-
-const supportMaterial = new THREE.MeshStandardMaterial({ color: 0xd7e1eb, roughness: 0.92, flatShading: true });
-[
-  [-165, -44],
-  [-165, 44],
-  [-75, -44],
-  [-75, 44],
-].forEach(([x, z]) => {
-  const support = new THREE.Mesh(new THREE.BoxGeometry(12, 150, 12), supportMaterial);
-  support.position.set(x, 75, z);
-  scene.add(support);
-});
-
-const underpassGuide = new THREE.Mesh(
-  new THREE.PlaneGeometry(180, 22),
-  new THREE.MeshStandardMaterial({ color: 0xdfe7ee, roughness: 0.95, metalness: 0.01 }),
-);
-underpassGuide.rotation.x = -Math.PI / 2;
-underpassGuide.position.set(-120, 0.031, 0);
-scene.add(underpassGuide);
+for (let index = 0; index < leftWallSections.length; index += 1) {
+  const inset = wallSectionInsets[index] || { start: 0, end: 0 };
+  addWallRun(leftWallSections[index], inset.start, inset.end);
+}
+for (let index = 0; index < rightWallSections.length; index += 1) {
+  const inset = wallSectionInsets[index] || { start: 0, end: 0 };
+  addWallRun(rightWallSections[index], inset.start, inset.end);
+}
 
 scene.add(wallGroup);
 
@@ -358,7 +492,12 @@ const state = {
   angle: 0,
   speed: 0,
   height: 0.03,
+  verticalSpeed: 0,
+  airborne: false,
+  jumpCooldown: 0,
   pitch: 0,
+  groundPitch: 0,
+  surfaceSectionIndex: 0,
   surfaceSegmentIndex: 0,
   rearSlip: 0,
   drifting: false,
@@ -369,6 +508,8 @@ const MAX_FORWARD_SPEED = 360;
 const MAX_REVERSE_SPEED = -90;
 const SPEED_TO_MPH = MAX_SPEED_MPH / MAX_FORWARD_SPEED;
 const SKID_MARK_LIFETIME = 4.5;
+const FRONT_AXLE_POINT = new THREE.Vector3(0, 0, 8.4);
+const REAR_AXLE_POINT = new THREE.Vector3(0, 0, -6.5);
 const REAR_WHEEL_POINTS = [
   new THREE.Vector3(-4.2, 0.08, -6.5),
   new THREE.Vector3(4.2, 0.08, -6.5),
@@ -390,50 +531,56 @@ function getVelocityVector() {
   return new THREE.Vector2(Math.cos(state.angle), Math.sin(state.angle)).multiplyScalar(state.speed);
 }
 
-function getTrackSurfaceInfo(x, z, currentHeight = null, previousSegmentIndex = null) {
+function getTrackSurfaceInfo(x, z, currentHeight = null, previousSectionIndex = null, previousSegmentIndex = null) {
   const point = new THREE.Vector2(x, z);
   let bestMatch = null;
 
-  for (let index = 0; index < trackSamples.length - 1; index += 1) {
-    const start = trackSamples[index];
-    const end = trackSamples[index + 1];
-    const segment = new THREE.Vector2(end.x - start.x, end.z - start.z);
-    const lengthSquared = segment.lengthSq();
-    if (lengthSquared === 0) {
-      continue;
-    }
+  for (let sectionIndex = 0; sectionIndex < trackSections.length; sectionIndex += 1) {
+    const section = trackSections[sectionIndex];
+    for (let index = 0; index < section.length - 1; index += 1) {
+      const start = section[index];
+      const end = section[index + 1];
+      const segment = new THREE.Vector2(end.x - start.x, end.z - start.z);
+      const lengthSquared = segment.lengthSq();
+      if (lengthSquared === 0) {
+        continue;
+      }
 
-    const t = THREE.MathUtils.clamp(
-      new THREE.Vector2(point.x - start.x, point.y - start.z).dot(segment) / lengthSquared,
-      0,
-      1,
-    );
-    const closestXZ = new THREE.Vector2(
-      THREE.MathUtils.lerp(start.x, end.x, t),
-      THREE.MathUtils.lerp(start.z, end.z, t),
-    );
-    const distance = closestXZ.distanceTo(point);
-    if (distance > TRACK_HALF_WIDTH + ROAD_SURFACE_MARGIN) {
-      continue;
-    }
+      const t = THREE.MathUtils.clamp(
+        new THREE.Vector2(point.x - start.x, point.y - start.z).dot(segment) / lengthSquared,
+        0,
+        1,
+      );
+      const closestXZ = new THREE.Vector2(
+        THREE.MathUtils.lerp(start.x, end.x, t),
+        THREE.MathUtils.lerp(start.z, end.z, t),
+      );
+      const distance = closestXZ.distanceTo(point);
+      if (distance > TRACK_HALF_WIDTH + ROAD_SURFACE_MARGIN) {
+        continue;
+      }
 
-    const candidateHeight = THREE.MathUtils.lerp(start.y, end.y, t);
-    const heightDelta = currentHeight == null ? Math.abs(candidateHeight - 0.03) : Math.abs(candidateHeight - currentHeight);
-    const continuityPenalty = previousSegmentIndex == null ? 0 : Math.min(Math.abs(index - previousSegmentIndex), 80) * 0.12;
-    const score = distance + heightDelta * 3.4 + continuityPenalty;
+      const candidateHeight = THREE.MathUtils.lerp(start.y, end.y, t);
+      const heightDelta = currentHeight == null ? Math.abs(candidateHeight - 0.03) : Math.abs(candidateHeight - currentHeight);
+      const continuityPenalty = previousSectionIndex == null
+        ? 0
+        : (sectionIndex === previousSectionIndex ? Math.min(Math.abs(index - previousSegmentIndex), 80) * 0.12 : 14);
+      const score = distance + heightDelta * 3.4 + continuityPenalty;
 
-    if (!bestMatch || score < bestMatch.score) {
-      const tangent3D = end.clone().sub(start).normalize();
-      const direction2D = new THREE.Vector2(tangent3D.x, tangent3D.z).normalize();
-      const horizontalLength = Math.hypot(end.x - start.x, end.z - start.z) || 1;
-      bestMatch = {
-        score,
-        index,
-        distance,
-        height: candidateHeight,
-        grade: (end.y - start.y) / horizontalLength,
-        direction: direction2D,
-      };
+      if (!bestMatch || score < bestMatch.score) {
+        const tangent3D = end.clone().sub(start).normalize();
+        const direction2D = new THREE.Vector2(tangent3D.x, tangent3D.z).normalize();
+        const horizontalLength = Math.hypot(end.x - start.x, end.z - start.z) || 1;
+        bestMatch = {
+          score,
+          sectionIndex,
+          index,
+          distance,
+          height: candidateHeight,
+          grade: (end.y - start.y) / horizontalLength,
+          direction: direction2D,
+        };
+      }
     }
   }
 
@@ -443,6 +590,7 @@ function getTrackSurfaceInfo(x, z, currentHeight = null, previousSegmentIndex = 
       height: 0.03,
       grade: 0,
       direction: new THREE.Vector2(1, 0),
+      sectionIndex: previousSectionIndex,
       segmentIndex: previousSegmentIndex,
     };
   }
@@ -457,6 +605,7 @@ function getTrackSurfaceInfo(x, z, currentHeight = null, previousSegmentIndex = 
       height: 0.03,
       grade: 0,
       direction: new THREE.Vector2(1, 0),
+      sectionIndex: previousSectionIndex,
       segmentIndex: previousSegmentIndex,
     };
   }
@@ -466,18 +615,45 @@ function getTrackSurfaceInfo(x, z, currentHeight = null, previousSegmentIndex = 
     height: bestMatch.height,
     grade: bestMatch.grade,
     direction: bestMatch.direction,
+    sectionIndex: bestMatch.sectionIndex,
     segmentIndex: bestMatch.index,
   };
 }
 
-function getSurfaceHeightAt(x, z, currentHeight = null, previousSegmentIndex = null) {
-  return getTrackSurfaceInfo(x, z, currentHeight, previousSegmentIndex).height;
+function getSurfaceHeightAt(x, z, currentHeight = null, previousSectionIndex = null, previousSegmentIndex = null) {
+  return getTrackSurfaceInfo(x, z, currentHeight, previousSectionIndex, previousSegmentIndex).height;
 }
 
 function getCarCollisionExtent(normal) {
   const forward = new THREE.Vector2(Math.cos(state.angle), Math.sin(state.angle));
   const right = new THREE.Vector2(-forward.y, forward.x);
   return Math.abs(normal.dot(right)) * CAR_HALF_WIDTH + Math.abs(normal.dot(forward)) * CAR_HALF_LENGTH;
+}
+
+function getJumpMeta(surfaceInfo) {
+  if (!surfaceInfo || surfaceInfo.sectionIndex == null || surfaceInfo.segmentIndex == null) {
+    return null;
+  }
+
+  const meta = trackSectionMeta[surfaceInfo.sectionIndex];
+  if (!meta || !meta.jump) {
+    return null;
+  }
+
+  if (surfaceInfo.segmentIndex < meta.jump.rampStartIndex) {
+    return null;
+  }
+
+  return meta.jump;
+}
+
+function getWorldAxlePoint(localPoint) {
+  const cosAngle = Math.cos(state.angle);
+  const sinAngle = Math.sin(state.angle);
+  return {
+    x: state.x + localPoint.x * cosAngle - localPoint.z * sinAngle,
+    z: state.z + localPoint.x * sinAngle + localPoint.z * cosAngle,
+  };
 }
 
 function resize() {
@@ -489,15 +665,21 @@ function resize() {
 }
 
 function resetCar() {
+  const spawnSection = trackSections[0];
   const spawnIndex = 4;
-  const spawnPoint = trackSamples[spawnIndex];
-  const spawnNext = trackSamples[spawnIndex + 2];
+  const spawnPoint = spawnSection[spawnIndex];
+  const spawnNext = spawnSection[spawnIndex + 2];
   state.x = spawnPoint.x;
   state.z = spawnPoint.z;
   state.angle = Math.atan2(spawnNext.z - spawnPoint.z, spawnNext.x - spawnPoint.x);
   state.speed = 0;
   state.height = spawnPoint.y;
+  state.verticalSpeed = 0;
+  state.airborne = false;
+  state.jumpCooldown = 0;
   state.pitch = 0;
+  state.groundPitch = 0;
+  state.surfaceSectionIndex = 0;
   state.surfaceSegmentIndex = spawnIndex;
   state.rearSlip = 0;
   state.drifting = false;
@@ -694,7 +876,12 @@ function updateCar(deltaTime) {
   const drifting = keys.has("Space");
   const steer = right - left;
   const previousAngle = state.angle;
+  const gravity = 132;
+  const maxGroundPitch = THREE.MathUtils.degToRad(16);
+  const minGroundPitch = THREE.MathUtils.degToRad(-10);
   let turnSpeedCap = MAX_FORWARD_SPEED;
+
+  state.jumpCooldown = Math.max(0, state.jumpCooldown - deltaTime);
 
   const acceleration = 92;
   const reverseForce = 78;
@@ -709,7 +896,8 @@ function updateCar(deltaTime) {
 
   state.speed = Math.max(MAX_REVERSE_SPEED, Math.min(MAX_FORWARD_SPEED, state.speed));
 
-  const turnStrength = (drifting ? 4.2 : 2.25) * (speedRatio + 0.18);
+  const steerAuthority = state.airborne ? 0.22 : 1;
+  const turnStrength = (drifting ? 4.2 : 2.25) * (speedRatio + 0.18) * steerAuthority;
   state.angle += steer * turnStrength * deltaTime * (state.speed >= 0 ? 1 : -1);
 
   const angleDelta = Math.abs(THREE.MathUtils.euclideanModulo(state.angle - previousAngle + Math.PI, Math.PI * 2) - Math.PI);
@@ -749,17 +937,76 @@ function updateCar(deltaTime) {
     state.z = resolvedPosition.z;
   }
 
-  const surfaceInfo = getTrackSurfaceInfo(state.x, state.z, state.height, state.surfaceSegmentIndex);
-  const forwardVector = new THREE.Vector2(Math.cos(state.angle), Math.sin(state.angle));
-  const forwardSlope = surfaceInfo.grade * surfaceInfo.direction.dot(forwardVector);
+  const surfaceInfo = getTrackSurfaceInfo(state.x, state.z, state.height, state.surfaceSectionIndex, state.surfaceSegmentIndex);
+  const frontAxle = getWorldAxlePoint(FRONT_AXLE_POINT);
+  const rearAxle = getWorldAxlePoint(REAR_AXLE_POINT);
+  const frontSurfaceInfo = getTrackSurfaceInfo(frontAxle.x, frontAxle.z, state.height, state.surfaceSectionIndex, state.surfaceSegmentIndex);
+  const rearSurfaceInfo = getTrackSurfaceInfo(rearAxle.x, rearAxle.z, state.height, state.surfaceSectionIndex, state.surfaceSegmentIndex);
+  const rawAxlePitch = Math.atan2(frontSurfaceInfo.height - rearSurfaceInfo.height, FRONT_AXLE_POINT.z - REAR_AXLE_POINT.z);
+  const groundedPitch = THREE.MathUtils.clamp(rawAxlePitch, minGroundPitch, maxGroundPitch);
+  const pitchKick = rawAxlePitch - state.groundPitch;
+  const jumpMeta = getJumpMeta(frontSurfaceInfo) || getJumpMeta(rearSurfaceInfo);
+  const nearJumpLip = !!jumpMeta
+    && ((frontSurfaceInfo.onTrack && frontSurfaceInfo.segmentIndex >= jumpMeta.lipStartIndex)
+      || (rearSurfaceInfo.onTrack && rearSurfaceInfo.segmentIndex >= jumpMeta.lipEndIndex - 1));
+  const hasRunOutOfJumpSurface = !frontSurfaceInfo.onTrack && !!getJumpMeta(rearSurfaceInfo);
+  const canRampLaunch = !state.airborne
+    && state.jumpCooldown === 0
+    && !!jumpMeta
+    && state.speed > jumpMeta.minSpeed
+    && rawAxlePitch > jumpMeta.minPitch
+    && pitchKick > jumpMeta.minPitchKick
+    && (nearJumpLip || hasRunOutOfJumpSurface);
 
-  state.surfaceSegmentIndex = surfaceInfo.segmentIndex;
-  state.height = surfaceInfo.height;
+  if (canRampLaunch || (!state.airborne && (!surfaceInfo.onTrack || !frontSurfaceInfo.onTrack || !rearSurfaceInfo.onTrack || state.height > surfaceInfo.height + 0.8))) {
+    const launchSpeed = canRampLaunch
+      ? Math.max(
+        jumpMeta.launchBoost,
+        state.speed * Math.max(0.18, Math.sin(Math.max(rawAxlePitch, jumpMeta.minPitch))) * 0.78,
+      )
+      : state.speed * Math.max(0, Math.sin(rawAxlePitch)) * 0.4;
+    state.airborne = true;
+    state.verticalSpeed = Math.max(state.verticalSpeed, launchSpeed);
+    state.pitch = THREE.MathUtils.clamp(rawAxlePitch * 0.76, minGroundPitch, THREE.MathUtils.degToRad(20));
+    state.jumpCooldown = canRampLaunch ? 0.3 : state.jumpCooldown;
+  }
+
+  if (state.airborne) {
+    state.verticalSpeed -= gravity * deltaTime;
+    state.height += state.verticalSpeed * deltaTime;
+
+    if (surfaceInfo.onTrack && state.verticalSpeed <= 0 && state.height <= surfaceInfo.height + 0.9) {
+      state.airborne = false;
+      state.height = surfaceInfo.height;
+      state.verticalSpeed = 0;
+      state.surfaceSectionIndex = surfaceInfo.sectionIndex;
+      state.surfaceSegmentIndex = surfaceInfo.segmentIndex;
+      state.groundPitch = groundedPitch;
+    }
+
+    if (state.height <= 0.03) {
+      state.airborne = false;
+      state.height = 0.03;
+      state.verticalSpeed = 0;
+      state.surfaceSectionIndex = surfaceInfo.sectionIndex;
+      state.surfaceSegmentIndex = surfaceInfo.segmentIndex;
+    }
+  } else {
+    state.surfaceSectionIndex = surfaceInfo.sectionIndex;
+    state.surfaceSegmentIndex = surfaceInfo.segmentIndex;
+    state.height = (frontSurfaceInfo.height + rearSurfaceInfo.height) * 0.5;
+    state.verticalSpeed = 0;
+    state.groundPitch = THREE.MathUtils.lerp(state.groundPitch, groundedPitch, 0.28);
+  }
+
   car.position.set(state.x, state.height, state.z);
-  state.pitch = THREE.MathUtils.lerp(state.pitch, Math.atan(forwardSlope) * 0.6, 0.16);
+  const targetPitch = state.airborne
+    ? THREE.MathUtils.clamp(state.pitch - state.verticalSpeed * 0.00055, minGroundPitch, THREE.MathUtils.degToRad(18))
+    : state.groundPitch;
+  state.pitch = THREE.MathUtils.lerp(state.pitch, targetPitch, state.airborne ? 0.045 : 0.16);
   car.rotation.x = state.pitch;
   car.rotation.y = Math.PI / 2 - state.angle;
-  car.rotation.z = THREE.MathUtils.clamp(steer * (drifting ? -0.06 : -0.035), -0.06, 0.06);
+  car.rotation.z = THREE.MathUtils.clamp(steer * (state.airborne ? -0.012 : drifting ? -0.06 : -0.035), -0.06, 0.06);
 
   const steerVisual = THREE.MathUtils.degToRad(-20) * steer * (drifting ? 1.15 : 1);
   frontWheelPivots.forEach((pivot) => {
