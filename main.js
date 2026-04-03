@@ -114,12 +114,7 @@ const TRACK_DATA = {
 };
 const LEADERBOARD_STORAGE_KEY = "drift-racer-leaderboard";
 const LAST_USERNAME_STORAGE_KEY = "drift-racer-last-username";
-const DEFAULT_LEADERBOARD = [
-  { username: "Ari", time: 84200 },
-  { username: "Mina", time: 90320 },
-  { username: "Rin", time: 95840 },
-  { username: "Sage", time: 101230 },
-];
+const DEFAULT_LEADERBOARD = [];
 
 function pushSectionPoint(section, point) {
   const previous = section[section.length - 1];
@@ -1809,7 +1804,6 @@ saveForm.addEventListener("submit", (event) => {
     return;
   }
 
-  leaderboardEntries = leaderboardEntries.slice();
   addLeaderboardEntry(username, pendingSaveTime ?? raceState.elapsedMs);
   localStorage.setItem(LAST_USERNAME_STORAGE_KEY, username);
   closeRaceAndReturnToMenu();
