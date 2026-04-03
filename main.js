@@ -1763,12 +1763,28 @@ function loop(now) {
 }
 
 window.addEventListener("resize", resize);
+let pressedKeys = new Set();
 window.addEventListener("keydown", (event) => {
   keys.add(event.code);
+  pressedKeys.add(event.code);
   if (event.code === "KeyR") {
     resetCar();
     resetRaceState();
   }
+  if ((event.key === "p" || event.key === "P") && raceState.phase === "staged") {
+    beginCountdown(performance.now());
+  }
+  // Reset leaderboard if 6 and 7 are pressed at the same time
+  if (pressedKeys.has("Digit6") && pressedKeys.has("Digit7")) {
+    leaderboardEntries = [];
+    saveLeaderboardEntries(leaderboardEntries);
+    renderLeaderboard();
+    statusValue.textContent = "Leaderboard reset!";
+  }
+});
+window.addEventListener("keyup", (event) => {
+  keys.delete(event.code);
+  pressedKeys.delete(event.code);
 });
 window.addEventListener("keyup", (event) => {
   keys.delete(event.code);
