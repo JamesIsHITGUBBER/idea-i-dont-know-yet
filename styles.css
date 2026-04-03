@@ -269,6 +269,10 @@ body {
   box-shadow: 0 30px 80px rgba(53, 33, 8, 0.3);
 }
 
+.modal-card--wide {
+  width: min(560px, 100%);
+}
+
 .modal-card h2 {
   margin: 0.2rem 0 0.45rem;
 }
@@ -283,6 +287,40 @@ body {
   gap: 0.75rem;
   flex-wrap: wrap;
   margin-top: 1rem;
+}
+
+.mode-grid {
+  display: grid;
+  gap: 0.85rem;
+  margin-top: 1rem;
+}
+
+.mode-card {
+  appearance: none;
+  width: 100%;
+  display: grid;
+  gap: 0.3rem;
+  text-align: left;
+  border: 1px solid rgba(132, 86, 28, 0.22);
+  background: linear-gradient(180deg, rgba(255, 251, 243, 0.98), rgba(243, 217, 171, 0.98));
+  color: var(--text);
+  border-radius: 20px;
+  padding: 1rem 1.05rem;
+  cursor: pointer;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.8);
+}
+
+.mode-card:hover {
+  transform: translateY(-1px);
+}
+
+.mode-card__name {
+  font-size: 1.2rem;
+  font-weight: 800;
+}
+
+.mode-card__stats {
+  color: var(--muted);
 }
 
 .modal-form {

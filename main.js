@@ -1,4 +1,9 @@
+// --- BOOST FEATURE ---
 import * as THREE from "https://cdn.jsdelivr.net/npm/three@0.163.0/build/three.module.js";
+
+let boostAvailable = true;
+let boostActive = false;
+let boostEndTime = 0;
 
 const canvas = document.getElementById("gameCanvas");
 const speedValue = document.getElementById("speedValue");
@@ -22,6 +27,12 @@ const usernameInput = document.getElementById("usernameInput");
 const saveYesButton = document.getElementById("saveYesButton");
 const saveNoButton = document.getElementById("saveNoButton");
 const saveCancelButton = document.getElementById("saveCancelButton");
+const modeModal = document.getElementById("modeModal");
+const modeCancelButton = document.getElementById("modeCancelButton");
+const modeButtons = Array.from(document.querySelectorAll("[data-mode]"));
+const profileModal = document.getElementById("profileModal");
+const profileCancelButton = document.getElementById("profileCancelButton");
+const profileButtons = Array.from(document.querySelectorAll("[data-profile]"));
 
 const renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
 renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
@@ -112,6 +123,16 @@ const TRACK_DATA = {
   difficulty: "1/10",
   description: "A clean desert loop with smooth turns and a simple start.",
 };
+const RACE_MODES = {
+  easy: { id: "easy", name: "Easy", topSpeedMph: 150, turnSpeedMph: 120 },
+  normal: { id: "normal", name: "Normal", topSpeedMph: 180, turnSpeedMph: 144 },
+  hard: { id: "hard", name: "Hard", topSpeedMph: 200, turnSpeedMph: 167 },
+  superHard: { id: "superHard", name: "Super Hard", topSpeedMph: 267, turnSpeedMph: 210 },
+};
+const TRACK_PROFILES = {
+  flat: { id: "flat", name: "Standard" },
+  jumps: { id: "jumps", name: "Jumps" },
+};
 const LEADERBOARD_STORAGE_KEY = "drift-racer-leaderboard";
 const LAST_USERNAME_STORAGE_KEY = "drift-racer-last-username";
 const DEFAULT_LEADERBOARD = [
@@ -184,7 +205,42 @@ function addSmoothPath(section, controlPoints, steps) {
   }
 }
 
-function buildTrackSections() {
+function applyRampLift(section, startIndex, riseLength, lipLength, fallLength, maxHeight, landingHeight = 0, rolloutLength = 0) {
+  const safeStart = THREE.MathUtils.clamp(startIndex, 0, section.length - 1);
+  const riseEnd = THREE.MathUtils.clamp(safeStart + riseLength, safeStart, section.length - 1);
+  const lipEnd = THREE.MathUtils.clamp(riseEnd + lipLength, riseEnd, section.length - 1);
+  const fallEnd = THREE.MathUtils.clamp(lipEnd + fallLength, lipEnd, section.length - 1);
+  const rolloutEnd = THREE.MathUtils.clamp(fallEnd + rolloutLength, fallEnd, section.length - 1);
+
+  for (let index = safeStart; index <= rolloutEnd; index += 1) {
+    let lift = 0;
+
+    if (index <= riseEnd) {
+      const progress = (index - safeStart) / Math.max(1, riseLength);
+      lift = THREE.MathUtils.lerp(0, maxHeight, progress);
+    } else if (index <= lipEnd) {
+      const progress = (index - riseEnd) / Math.max(1, lipLength);
+      lift = THREE.MathUtils.lerp(maxHeight, maxHeight * 1.06, progress);
+    } else if (index <= fallEnd) {
+      const progress = (index - lipEnd) / Math.max(1, fallLength);
+      lift = THREE.MathUtils.lerp(maxHeight * 1.06, landingHeight, progress);
+    } else {
+      const progress = (index - fallEnd) / Math.max(1, rolloutLength);
+      lift = THREE.MathUtils.lerp(landingHeight, 0, progress);
+    }
+
+    section[index].y += lift;
+  }
+
+  return {
+    rampStartIndex: safeStart,
+    lipStartIndex: Math.max(safeStart, riseEnd - 2),
+    lipEndIndex: Math.min(section.length - 1, lipEnd + 2),
+    rolloutEndIndex: rolloutEnd,
+  };
+}
+
+function buildTrackSections(profileId = "flat") {
   const mainSection = [];
   const controlPoints = [
     new THREE.Vector3(-1760, 0.03, -240),
@@ -221,17 +277,54 @@ function buildTrackSections() {
 
   addSmoothPath(mainSection, controlPoints, 440);
 
-  trackSectionMeta.push(
-    {
-      wallStartInset: 0,
-      wallEndInset: 0,
-    },
-  );
+  const meta = [{ wallStartInset: 0, wallEndInset: 0 }];
+  if (profileId === "jumps") {
+    applyRampLift(
+      mainSection,
+      Math.floor(mainSection.length * 0.17),
+      18,
+      5,
+      16,
+      20,
+      4,
+      14,
+    );
 
-  return [mainSection];
+    const bermStart = Math.floor(mainSection.length * 0.49);
+    const bermEnd = Math.floor(mainSection.length * 0.62);
+    for (let index = bermStart; index <= bermEnd; index += 1) {
+      const progress = (index - bermStart) / Math.max(1, bermEnd - bermStart);
+      mainSection[index].y += Math.sin(progress * Math.PI) * 12;
+    }
+
+    const mainRamp = applyRampLift(
+      mainSection,
+      Math.floor(mainSection.length * 0.75),
+      22,
+      6,
+      18,
+      42,
+      8,
+      16,
+    );
+
+    meta[0].jump = {
+      rampStartIndex: Math.max(0, mainRamp.rampStartIndex - 6),
+      lipStartIndex: mainRamp.lipStartIndex,
+      lipEndIndex: mainRamp.lipEndIndex,
+      minSpeed: 120,
+      minPitch: 0.08,
+      minPitchKick: 0.03,
+      launchBoost: 240,
+    };
+  }
+
+  return { sections: [mainSection], meta };
 }
 
-trackSections.push(...buildTrackSections());
+const initialTrackLayout = buildTrackSections(TRACK_PROFILES.flat.id);
+trackSections.push(...initialTrackLayout.sections);
+trackSectionMeta.push(...initialTrackLayout.meta);
 
 function buildTrackDistances(section) {
   const distances = [0];
@@ -592,6 +685,93 @@ for (let index = 0; index < rightWallSections.length; index += 1) {
 
 scene.add(wallGroup);
 
+function clearTrackRenderGroup(group, keepMaterial = null) {
+  group.children.forEach((child) => {
+    if (child.geometry) {
+      child.geometry.dispose();
+    }
+
+    const materials = Array.isArray(child.material) ? child.material : [child.material];
+    materials.forEach((material) => {
+      if (material && material !== keepMaterial) {
+        material.dispose();
+      }
+    });
+  });
+  group.clear();
+}
+
+function rebuildTrackLayout(profileId = "flat") {
+  clearTrackRenderGroup(roadGroup);
+  clearTrackRenderGroup(wallGroup, wallMaterial);
+
+  wallColliders.length = 0;
+  trackSections.length = 0;
+  trackSectionMeta.length = 0;
+  leftWallSections.length = 0;
+  rightWallSections.length = 0;
+  wallSectionInsets.length = 0;
+  trackDistances.length = 0;
+
+  const layout = buildTrackSections(profileId);
+  trackSections.push(...layout.sections);
+  trackSectionMeta.push(...layout.meta);
+
+  for (const section of trackSections) {
+    const sectionMeta = trackSectionMeta[leftWallSections.length] || { wallStartInset: 0, wallEndInset: 0 };
+    const roadVertices = [];
+    const roadIndices = [];
+    const leftEdgeSamples = buildOffsetSamples(section, -TRACK_HALF_WIDTH);
+    const rightEdgeSamples = buildOffsetSamples(section, TRACK_HALF_WIDTH);
+    const leftWallSamples = buildOffsetSamples(section, -(TRACK_HALF_WIDTH + WALL_THICKNESS * 0.5));
+    const rightWallSamples = buildOffsetSamples(section, TRACK_HALF_WIDTH + WALL_THICKNESS * 0.5);
+
+    for (let index = 0; index < section.length; index += 1) {
+      const leftEdge = leftEdgeSamples[index];
+      const rightEdge = rightEdgeSamples[index];
+      roadVertices.push(leftEdge.x, leftEdge.y, leftEdge.z, rightEdge.x, rightEdge.y, rightEdge.z);
+
+      if (index < section.length - 1) {
+        const base = index * 2;
+        roadIndices.push(base, base + 1, base + 2, base + 1, base + 3, base + 2);
+      }
+    }
+
+    leftWallSections.push(leftWallSamples);
+    rightWallSections.push(rightWallSamples);
+    wallSectionInsets.push({ start: sectionMeta.wallStartInset || 0, end: sectionMeta.wallEndInset || 0 });
+
+    const roadGeometry = new THREE.BufferGeometry();
+    roadGeometry.setAttribute("position", new THREE.Float32BufferAttribute(roadVertices, 3));
+    roadGeometry.setIndex(roadIndices);
+    roadGeometry.computeVertexNormals();
+    roadGroup.add(
+      new THREE.Mesh(
+        roadGeometry,
+        new THREE.MeshStandardMaterial({ color: 0x7f909f, roughness: 0.96, metalness: 0.02 }),
+      ),
+    );
+  }
+
+  for (let index = 0; index < leftWallSections.length; index += 1) {
+    const inset = wallSectionInsets[index] || { start: 0, end: 0 };
+    addWallRun(leftWallSections[index], inset.start, inset.end);
+  }
+  for (let index = 0; index < rightWallSections.length; index += 1) {
+    const inset = wallSectionInsets[index] || { start: 0, end: 0 };
+    addWallRun(rightWallSections[index], inset.start, inset.end);
+  }
+
+  trackDistances.push(...buildTrackDistances(trackSections[0]));
+  raceState.startSegmentIndex = getStartSegmentIndex();
+  raceState.finishSegmentIndex = findSegmentIndexByDistance(
+    trackDistances[trackDistances.length - 1] - CAR_HALF_LENGTH * 2,
+  );
+  placeGate(startGate, raceState.startSegmentIndex, getStartGateRotation());
+  placeGate(finishGate, raceState.finishSegmentIndex, getFinishGateRotation());
+  resetCar();
+}
+
 const car = new THREE.Group();
 car.position.y = 0.18;
 const bodyMaterial = new THREE.MeshStandardMaterial({ color: 0xc43a3a, roughness: 0.35, flatShading: true });
@@ -843,6 +1023,8 @@ const raceState = {
 const MAX_SPEED_MPH = 180;
 const MAX_FORWARD_SPEED = 360;
 const MAX_REVERSE_SPEED = -90;
+const BOOST_TOP_SPEED_MPH = 300;
+const BOOST_DURATION_MS = 1000;
 const SPEED_TO_MPH = MAX_SPEED_MPH / MAX_FORWARD_SPEED;
 const START_LIGHT_COUNT = 5;
 const START_LIGHT_INTERVAL_MS = 420;
@@ -861,6 +1043,9 @@ const skidState = {
   previousRight: null,
   marks: [],
 };
+let currentRaceMode = null;
+let currentTrackProfile = TRACK_PROFILES.flat;
+let pendingRaceMode = null;
 
 function blendAngle(current, target, amount) {
   const delta = THREE.MathUtils.euclideanModulo(target - current + Math.PI, Math.PI * 2) - Math.PI;
@@ -1012,6 +1197,88 @@ function formatTime(milliseconds) {
   return `${minutes.toString().padStart(2, "0")}:${seconds.toString().padStart(2, "0")}.${millis.toString().padStart(3, "0")}`;
 }
 
+function resetBoostState() {
+  boostAvailable = true;
+  boostActive = false;
+  boostEndTime = 0;
+}
+
+function triggerBoost(now) {
+  if (!boostAvailable || raceState.phase !== "racing") {
+    return;
+  }
+
+  boostAvailable = false;
+  boostActive = true;
+  boostEndTime = now + BOOST_DURATION_MS;
+  statusValue.textContent = "Boost!";
+}
+
+function updateBoost(now) {
+  if (!boostActive) {
+    return;
+  }
+
+  if (raceState.phase !== "racing" || now >= boostEndTime) {
+    boostActive = false;
+    if (raceState.phase === "racing") {
+      statusValue.textContent = "Go.";
+    }
+  }
+}
+
+function getRaceMode() {
+  return currentRaceMode ?? RACE_MODES.normal;
+}
+
+function getTrackProfile() {
+  return currentTrackProfile ?? TRACK_PROFILES.flat;
+}
+
+function getForwardSpeedCap() {
+  const mode = getRaceMode();
+  const topSpeedMph = boostActive ? Math.max(mode.topSpeedMph, BOOST_TOP_SPEED_MPH) : mode.topSpeedMph;
+  return topSpeedMph / SPEED_TO_MPH;
+}
+
+function getTurnSpeedFloor() {
+  return getRaceMode().turnSpeedMph / SPEED_TO_MPH;
+}
+
+function hideModeModal() {
+  modeModal.classList.add("is-hidden");
+  modeModal.setAttribute("aria-hidden", "true");
+}
+
+function openModeModal() {
+  modeModal.classList.remove("is-hidden");
+  modeModal.setAttribute("aria-hidden", "false");
+}
+
+function hideProfileModal() {
+  profileModal.classList.add("is-hidden");
+  profileModal.setAttribute("aria-hidden", "true");
+}
+
+function openProfileModal() {
+  profileModal.classList.remove("is-hidden");
+  profileModal.setAttribute("aria-hidden", "false");
+}
+
+function startRaceWithMode(modeId) {
+  pendingRaceMode = RACE_MODES[modeId] ?? RACE_MODES.normal;
+  hideModeModal();
+  openProfileModal();
+}
+
+function startRaceWithProfile(profileId) {
+  currentRaceMode = pendingRaceMode ?? RACE_MODES.normal;
+  currentTrackProfile = TRACK_PROFILES[profileId] ?? TRACK_PROFILES.flat;
+  rebuildTrackLayout(currentTrackProfile.id);
+  hideProfileModal();
+  beginCountdown(performance.now());
+}
+
 function loadLeaderboardEntries() {
   try {
     const storedValue = localStorage.getItem(LEADERBOARD_STORAGE_KEY);
@@ -1076,6 +1343,8 @@ function showHomeView() {
   homeView.classList.remove("is-hidden");
   detailView.classList.add("is-hidden");
   hudOverlay.classList.remove("is-visible");
+  hideModeModal();
+  hideProfileModal();
 }
 
 function showDetailView() {
@@ -1084,6 +1353,8 @@ function showDetailView() {
   detailView.classList.remove("is-hidden");
   renderLeaderboard();
   hudOverlay.classList.remove("is-visible");
+  hideModeModal();
+  hideProfileModal();
 }
 
 function hideSaveModal() {
@@ -1241,8 +1512,11 @@ function resetRaceState() {
   raceState.lastProgressDistance = 0;
   raceState.startedPastLine = false;
   timerValue.textContent = formatTime(0);
-  statusValue.textContent = `Press Start to begin ${TRACK_DATA.name}.`;
+  statusValue.textContent = currentRaceMode
+    ? `Press Start to begin ${TRACK_DATA.name} (${currentRaceMode.name}, ${getTrackProfile().name}).`
+    : `Press Start to begin ${TRACK_DATA.name}.`;
   setStartLightStage(0);
+  resetBoostState();
 }
 
 function setStartLightStage(stage) {
@@ -1271,6 +1545,8 @@ function beginCountdown(now) {
   setStartLightStage(0);
   menuScreen.classList.add("is-hidden");
   hudOverlay.classList.add("is-visible");
+  hideModeModal();
+  hideProfileModal();
   hideSaveModal();
 }
 
@@ -1279,11 +1555,12 @@ function beginRace(now) {
   raceState.raceStart = now;
   raceState.elapsedMs = 0;
   raceState.lastProgressDistance = 0;
-  statusValue.textContent = "Go.";
+  statusValue.textContent = `${getRaceMode().name} mode · ${getTrackProfile().name}. Go.`;
   setStartLightStage(0);
   menuScreen.classList.add("is-hidden");
   hudOverlay.classList.add("is-visible");
   hideSaveModal();
+  resetBoostState();
 }
 
 function finishRace() {
@@ -1548,13 +1825,14 @@ function updateCar(deltaTime) {
   const gravity = 132;
   const maxGroundPitch = THREE.MathUtils.degToRad(16);
   const minGroundPitch = THREE.MathUtils.degToRad(-10);
-  let turnSpeedCap = MAX_FORWARD_SPEED;
+  const forwardSpeedCap = getForwardSpeedCap();
+  let turnSpeedCap = forwardSpeedCap;
 
   state.jumpCooldown = Math.max(0, state.jumpCooldown - deltaTime);
 
   const acceleration = 92;
   const reverseForce = 78;
-  const speedRatio = Math.min(1, Math.abs(state.speed) / MAX_FORWARD_SPEED);
+  const speedRatio = Math.min(1, Math.abs(state.speed) / forwardSpeedCap);
 
   const throttleEnabled = raceState.phase === "racing";
   state.speed += (throttleEnabled ? accelerate : 0) * acceleration * deltaTime;
@@ -1564,7 +1842,7 @@ function updateCar(deltaTime) {
     state.speed *= Math.pow(drifting ? 0.989 : 0.9925, deltaTime * 60);
   }
 
-  state.speed = Math.max(MAX_REVERSE_SPEED, Math.min(MAX_FORWARD_SPEED, state.speed));
+  state.speed = Math.max(MAX_REVERSE_SPEED, Math.min(forwardSpeedCap, state.speed));
 
   const steerAuthority = state.airborne ? 0.22 : 1;
   const steerStrength = throttleEnabled ? steer : 0;
@@ -1578,7 +1856,7 @@ function updateCar(deltaTime) {
     const turnSeverity = Math.abs(steer) * Math.min(turnSharpness / 1.2, 1);
     const turnPenaltyMph = 100 * turnSeverity;
     const turnPenaltySpeed = turnPenaltyMph / SPEED_TO_MPH;
-    turnSpeedCap = MAX_FORWARD_SPEED - turnPenaltySpeed;
+    turnSpeedCap = Math.max(getTurnSpeedFloor(), forwardSpeedCap - turnPenaltySpeed);
 
     if (state.speed > turnSpeedCap) {
       state.speed = Math.max(turnSpeedCap, state.speed - (52 + 90 * turnSharpness) * deltaTime);
@@ -1590,7 +1868,7 @@ function updateCar(deltaTime) {
   }
 
   if (state.speed > 0) {
-    state.speed = Math.min(state.speed, drifting ? MAX_FORWARD_SPEED : turnSpeedCap);
+    state.speed = Math.min(state.speed, drifting ? forwardSpeedCap : turnSpeedCap);
   }
 
   state.rearSlip = THREE.MathUtils.lerp(state.rearSlip, Math.abs(steerStrength) * speedRatio * (drifting ? 1.35 : 0.28), 0.12);
@@ -1750,12 +2028,13 @@ function loop(now) {
   const deltaTime = Math.min(0.033, (now - lastTime) / 1000 || 0.016);
   lastTime = now;
 
+  updateBoost(now);
   updateCar(deltaTime);
   updateCamera(deltaTime);
   updateSkidMarks(deltaTime);
   updateRace(now);
 
-  speedValue.textContent = `${Math.min(MAX_SPEED_MPH, Math.round(Math.abs(state.speed) * SPEED_TO_MPH))} mph`;
+  speedValue.textContent = `${Math.round(Math.abs(state.speed) * SPEED_TO_MPH)} mph`;
   headingValue.textContent = Math.round((THREE.MathUtils.radToDeg(state.angle) % 360 + 360) % 360).toString();
 
   renderer.render(scene, camera);
@@ -1772,7 +2051,7 @@ window.addEventListener("keydown", (event) => {
     resetRaceState();
   }
   if ((event.key === "p" || event.key === "P") && raceState.phase === "staged") {
-    beginCountdown(performance.now());
+    openModeModal();
   }
   // Reset leaderboard if 6 and 7 are pressed at the same time
   if (pressedKeys.has("Digit6") && pressedKeys.has("Digit7")) {
@@ -1781,13 +2060,14 @@ window.addEventListener("keydown", (event) => {
     renderLeaderboard();
     statusValue.textContent = "Leaderboard reset!";
   }
+  if ((event.key === "b" || event.key === "B") && boostAvailable && raceState.phase === "racing") {
+    triggerBoost(performance.now());
+  }
 });
+
 window.addEventListener("keyup", (event) => {
   keys.delete(event.code);
   pressedKeys.delete(event.code);
-});
-window.addEventListener("keyup", (event) => {
-  keys.delete(event.code);
 });
 
 trackCardButton.addEventListener("click", () => {
@@ -1800,8 +2080,29 @@ backButton.addEventListener("click", () => {
 
 startRaceButton.addEventListener("click", () => {
   if (raceState.phase === "staged") {
-    beginCountdown(performance.now());
+    openModeModal();
   }
+});
+
+modeButtons.forEach((button) => {
+  button.addEventListener("click", () => {
+    startRaceWithMode(button.dataset.mode);
+  });
+});
+
+modeCancelButton.addEventListener("click", () => {
+  hideModeModal();
+});
+
+profileButtons.forEach((button) => {
+  button.addEventListener("click", () => {
+    startRaceWithProfile(button.dataset.profile);
+  });
+});
+
+profileCancelButton.addEventListener("click", () => {
+  hideProfileModal();
+  openModeModal();
 });
 
 saveYesButton.addEventListener("click", () => {

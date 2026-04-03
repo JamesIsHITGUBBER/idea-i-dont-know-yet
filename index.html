@@ -85,6 +85,60 @@
       </div>
     </div>
 
+    <div class="modal-overlay is-hidden" id="modeModal" aria-hidden="true">
+      <div class="modal-card modal-card--wide">
+        <div class="label">Pick Mode</div>
+        <h2>Choose Your Pace</h2>
+        <p>Select a driving mode before the start lights begin.</p>
+
+        <div class="mode-grid">
+          <button class="mode-card" data-mode="easy" type="button">
+            <span class="mode-card__name">Easy</span>
+            <span class="mode-card__stats">150 top speed · 120 on turns</span>
+          </button>
+          <button class="mode-card" data-mode="normal" type="button">
+            <span class="mode-card__name">Normal</span>
+            <span class="mode-card__stats">180 top speed · 144 on turns</span>
+          </button>
+          <button class="mode-card" data-mode="hard" type="button">
+            <span class="mode-card__name">Hard</span>
+            <span class="mode-card__stats">200 top speed · 167 on turns</span>
+          </button>
+          <button class="mode-card" data-mode="superHard" type="button">
+            <span class="mode-card__name">Super Hard</span>
+            <span class="mode-card__stats">267 top speed · 210 on turns</span>
+          </button>
+        </div>
+
+        <div class="modal-actions">
+          <button class="ghost-button" id="modeCancelButton" type="button">Cancel</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="modal-overlay is-hidden" id="profileModal" aria-hidden="true">
+      <div class="modal-card modal-card--wide">
+        <div class="label">Track Option</div>
+        <h2>Choose Layout</h2>
+        <p>Pick the standard route or a version with bigger jumps and raised sections.</p>
+
+        <div class="mode-grid">
+          <button class="mode-card" data-profile="flat" type="button">
+            <span class="mode-card__name">Standard</span>
+            <span class="mode-card__stats">The regular flat route.</span>
+          </button>
+          <button class="mode-card" data-profile="jumps" type="button">
+            <span class="mode-card__name">Jumps</span>
+            <span class="mode-card__stats">Higher jumps, berms, and lifted sections.</span>
+          </button>
+        </div>
+
+        <div class="modal-actions">
+          <button class="ghost-button" id="profileCancelButton" type="button">Back</button>
+        </div>
+      </div>
+    </div>
+
     <script type="module" src="main.js"></script>
   </body>
 </html>
