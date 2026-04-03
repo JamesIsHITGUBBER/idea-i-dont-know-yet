@@ -76,6 +76,11 @@ body {
   line-height: 1.45;
 }
 
+#statusValue {
+  font-weight: 600;
+  color: var(--text);
+}
+
 .stats {
   display: grid;
   gap: 0.65rem;
