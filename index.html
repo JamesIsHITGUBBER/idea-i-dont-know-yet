@@ -9,17 +9,79 @@
   <body>
     <canvas id="gameCanvas"></canvas>
 
-    <div class="hud">
-      <div class="hud-card">
-        <div class="label">Driving Sandbox</div>
-        <h1>Polytrack Test Course</h1>
-        <p>Use WASD or arrow keys to drive. Hold space to drift and lay down skid marks. Press P to start the run. Cross the finish gate to stop the timer. Press R to reset.</p>
-        <p id="statusValue">Press P to start the run.</p>
+    <div class="menu-screen" id="menuScreen">
+      <div class="menu-shell">
+        <section class="menu-view" id="homeView">
+          <div class="label">Home Screen</div>
+          <h1>Drift Racer</h1>
+          <p class="menu-description">Pick a track and check the leaderboard before you start.</p>
+
+          <button class="track-card" id="trackCardButton" type="button">
+            <div class="track-card__meta">
+              <span class="track-card__tag">Track 1</span>
+              <span class="track-card__difficulty">Difficulty 1/10</span>
+            </div>
+            <h2>Desert Drifter</h2>
+            <p>A clean desert loop with smooth turns and a simple start.</p>
+            <span class="track-card__cta">View leaderboard</span>
+          </button>
+        </section>
+
+        <section class="menu-view is-hidden" id="detailView">
+          <div class="detail-header">
+            <div>
+              <div class="label">Track Detail</div>
+              <h2>Desert Drifter</h2>
+              <p class="menu-description">Difficulty 1/10. A simple desert route built for clean drifting.</p>
+            </div>
+            <button class="ghost-button" id="backButton" type="button">Back</button>
+          </div>
+
+          <div class="leaderboard-panel">
+            <div class="leaderboard-panel__header">
+              <h3>Leaderboard</h3>
+              <span>Times</span>
+            </div>
+            <ol class="leaderboard-list" id="leaderboardList"></ol>
+          </div>
+
+          <div class="detail-actions">
+            <button class="primary-button" id="startRaceButton" type="button">Start Desert Drifter</button>
+          </div>
+        </section>
+      </div>
+    </div>
+
+    <div class="hud hud--play" id="hudOverlay" aria-hidden="true">
+      <div class="hud-card hud-card--compact">
+        <p id="statusValue">Press Start to begin Desert Drifter.</p>
       </div>
       <div class="stats">
         <div class="stat">Timer <strong id="timerValue">00:00.000</strong></div>
         <div class="stat">Speed <strong id="speedValue">0 mph</strong></div>
         <div class="stat">Heading <strong id="headingValue">0</strong></div>
+      </div>
+    </div>
+
+    <div class="modal-overlay is-hidden" id="saveModal" aria-hidden="true">
+      <div class="modal-card">
+        <div class="label">New Time</div>
+        <h2 id="saveModalTitle">Add this time?</h2>
+        <p id="saveModalBody">Do you want to add your time to the leaderboard?</p>
+
+        <div class="modal-actions" id="saveModalActions">
+          <button class="primary-button" id="saveYesButton" type="button">Yes</button>
+          <button class="ghost-button" id="saveNoButton" type="button">No</button>
+        </div>
+
+        <form class="modal-form is-hidden" id="saveForm">
+          <label class="modal-label" for="usernameInput">Username</label>
+          <input id="usernameInput" name="username" type="text" maxlength="18" autocomplete="nickname" placeholder="Enter a username" />
+          <div class="modal-actions">
+            <button class="primary-button" type="submit">Add to leaderboard</button>
+            <button class="ghost-button" id="saveCancelButton" type="button">Cancel</button>
+          </div>
+        </form>
       </div>
     </div>
 

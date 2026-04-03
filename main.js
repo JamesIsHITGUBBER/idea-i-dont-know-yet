@@ -5,6 +5,23 @@ const speedValue = document.getElementById("speedValue");
 const headingValue = document.getElementById("headingValue");
 const timerValue = document.getElementById("timerValue");
 const statusValue = document.getElementById("statusValue");
+const menuScreen = document.getElementById("menuScreen");
+const hudOverlay = document.getElementById("hudOverlay");
+const homeView = document.getElementById("homeView");
+const detailView = document.getElementById("detailView");
+const trackCardButton = document.getElementById("trackCardButton");
+const startRaceButton = document.getElementById("startRaceButton");
+const backButton = document.getElementById("backButton");
+const leaderboardList = document.getElementById("leaderboardList");
+const saveModal = document.getElementById("saveModal");
+const saveModalTitle = document.getElementById("saveModalTitle");
+const saveModalBody = document.getElementById("saveModalBody");
+const saveModalActions = document.getElementById("saveModalActions");
+const saveForm = document.getElementById("saveForm");
+const usernameInput = document.getElementById("usernameInput");
+const saveYesButton = document.getElementById("saveYesButton");
+const saveNoButton = document.getElementById("saveNoButton");
+const saveCancelButton = document.getElementById("saveCancelButton");
 
 const renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
 renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
@@ -13,32 +30,66 @@ renderer.toneMapping = THREE.ACESFilmicToneMapping;
 renderer.toneMappingExposure = 1.1;
 
 const scene = new THREE.Scene();
-scene.background = new THREE.Color(0xdce8f4);
-scene.fog = new THREE.Fog(0xdce8f4, 120, 1800);
+scene.background = new THREE.Color(0xf3cf9b);
+scene.fog = new THREE.Fog(0xf3cf9b, 160, 2100);
 
 const camera = new THREE.PerspectiveCamera(60, 1, 0.1, 4000);
 
-scene.add(new THREE.AmbientLight(0xe7f2fb, 1.3));
-scene.add(new THREE.HemisphereLight(0xffffff, 0xb6cbdf, 1.05));
-const sun = new THREE.DirectionalLight(0xffffff, 1.9);
-sun.position.set(-180, 320, 120);
+scene.add(new THREE.AmbientLight(0xffe1b5, 1.25));
+scene.add(new THREE.HemisphereLight(0xfff2d6, 0xc68c44, 1.0));
+const sun = new THREE.DirectionalLight(0xfff2d6, 2.05);
+sun.position.set(-240, 360, 160);
 scene.add(sun);
 
 const ground = new THREE.Mesh(
   new THREE.PlaneGeometry(4000, 4000),
-  new THREE.MeshStandardMaterial({ color: 0xc9dae8, roughness: 1, metalness: 0 }),
+  new THREE.MeshStandardMaterial({ color: 0xd8b16b, roughness: 1, metalness: 0 }),
 );
 ground.rotation.x = -Math.PI / 2;
 scene.add(ground);
 
-const grid = new THREE.GridHelper(4000, 80, 0x91a9bf, 0xb9cad9);
-grid.position.y = 0.05;
-grid.material.transparent = true;
-grid.material.opacity = 0.42;
-scene.add(grid);
+function createPyramid(width, height, color) {
+  const pyramid = new THREE.Group();
+  const base = new THREE.Mesh(
+    new THREE.CylinderGeometry(width, width, height, 4, 1, false),
+    new THREE.MeshStandardMaterial({ color, roughness: 1, flatShading: true }),
+  );
+  base.rotation.y = Math.PI / 4;
+  pyramid.add(base);
+
+  const shadowSide = new THREE.Mesh(
+    new THREE.CylinderGeometry(width * 0.99, width * 0.8, height * 0.98, 4, 1, false),
+    new THREE.MeshStandardMaterial({ color: 0xc79b57, roughness: 1, flatShading: true }),
+  );
+  shadowSide.rotation.y = -Math.PI / 4;
+  shadowSide.position.y = -0.02;
+  pyramid.add(shadowSide);
+
+  return pyramid;
+}
+
+const desertSet = new THREE.Group();
+const pyramidPositions = [
+  { x: 1680, z: -1080, scale: 1.7 },
+  { x: 1920, z: -930, scale: 1.15 },
+  { x: 2140, z: -720, scale: 2.1 },
+  { x: -1860, z: -820, scale: 1.45 },
+  { x: -2130, z: -1040, scale: 1.85 },
+  { x: 1780, z: 1360, scale: 1.4 },
+  { x: -1980, z: 1320, scale: 1.25 },
+];
+
+pyramidPositions.forEach((entry, index) => {
+  const pyramid = createPyramid(70 * entry.scale, 110 * entry.scale, index % 2 === 0 ? 0xe0bf74 : 0xcfad63);
+  pyramid.position.set(entry.x, 0, entry.z);
+  pyramid.rotation.y = (index % 3) * 0.32;
+  desertSet.add(pyramid);
+});
+
+scene.add(desertSet);
 
 const TRACK_WIDTH = 74;
-const WALL_HEIGHT = 18;
+const WALL_HEIGHT = 17.25;
 const WALL_THICKNESS = 6;
 const CAR_HALF_WIDTH = 5.4;
 const CAR_HALF_LENGTH = 12.4;
@@ -53,6 +104,22 @@ const rightWallSections = [];
 const wallSectionInsets = [];
 const trackDistances = [];
 const SPAWN_SEGMENT_INDEX = 4;
+const CAR_COLLISION_HALF_WIDTH = 4.7;
+const CAR_COLLISION_HALF_LENGTH = 11.4;
+const TRACK_DATA = {
+  id: "desert-drifter",
+  name: "Desert Drifter",
+  difficulty: "1/10",
+  description: "A clean desert loop with smooth turns and a simple start.",
+};
+const LEADERBOARD_STORAGE_KEY = "drift-racer-leaderboard";
+const LAST_USERNAME_STORAGE_KEY = "drift-racer-last-username";
+const DEFAULT_LEADERBOARD = [
+  { username: "Ari", time: 84200 },
+  { username: "Mina", time: 90320 },
+  { username: "Rin", time: 95840 },
+  { username: "Sage", time: 101230 },
+];
 
 function pushSectionPoint(section, point) {
   const previous = section[section.length - 1];
@@ -314,6 +381,10 @@ function addOrientedSegment3D({
   target.add(mesh);
 }
 
+function isOnRoad(x, z) {
+  return getTrackSurfaceInfo(x, z).onTrack;
+}
+
 const roadGroup = new THREE.Group();
 for (const section of trackSections) {
   const sectionMeta = trackSectionMeta[leftWallSections.length] || { wallStartInset: 0, wallEndInset: 0 };
@@ -351,20 +422,6 @@ for (const section of trackSections) {
   );
 }
 scene.add(roadGroup);
-
-const laneStripeMaterial = new THREE.MeshStandardMaterial({ color: 0xf3f7fb, roughness: 0.7, flatShading: true });
-for (const section of trackSections) {
-  for (let index = 0; index < section.length - 10; index += 14) {
-    addOrientedSegment3D({
-      start: section[index],
-      end: section[Math.min(section.length - 1, index + 7)],
-      thickness: 1.2,
-      height: 0.08,
-      material: laneStripeMaterial,
-      yOffset: 0.04,
-    });
-  }
-}
 
 const wallGroup = new THREE.Group();
 const wallMaterial = new THREE.MeshStandardMaterial({ color: 0xf4f7fb, roughness: 0.92, flatShading: true, side: THREE.DoubleSide });
@@ -535,19 +592,6 @@ for (let index = 0; index < rightWallSections.length; index += 1) {
 
 scene.add(wallGroup);
 
-const decoMaterial = new THREE.MeshStandardMaterial({ color: 0xb6cadf, roughness: 1, flatShading: true });
-for (let index = 0; index < 24; index += 1) {
-  const rock = new THREE.Mesh(new THREE.DodecahedronGeometry(20 + Math.random() * 26, 0), decoMaterial);
-  rock.position.set(
-    -1500 + Math.random() * 3000,
-    18 + Math.random() * 24,
-    -1500 + Math.random() * 3000,
-  );
-  rock.scale.set(1, 0.35 + Math.random() * 1.2, 1);
-  rock.rotation.set(Math.random() * Math.PI, Math.random() * Math.PI, Math.random() * Math.PI);
-  scene.add(rock);
-}
-
 const car = new THREE.Group();
 car.position.y = 0.18;
 const bodyMaterial = new THREE.MeshStandardMaterial({ color: 0xc43a3a, roughness: 0.35, flatShading: true });
@@ -700,39 +744,59 @@ function createGate(color, withStartLights = false) {
   if (withStartLights) {
     const lightGroup = new THREE.Group();
     const housingMaterial = new THREE.MeshStandardMaterial({ color: 0x17202a, roughness: 0.85, flatShading: true });
-    const redMaterial = new THREE.MeshStandardMaterial({
-      color: 0x3c1214,
-      emissive: 0x6f1518,
-      emissiveIntensity: 0.35,
-      roughness: 0.45,
-      flatShading: true,
-      side: THREE.DoubleSide,
-    });
-    const activeMaterial = new THREE.MeshStandardMaterial({
-      color: 0xf5efe6,
-      emissive: 0xff6b3d,
-      emissiveIntensity: 1.1,
-      roughness: 0.2,
-      flatShading: true,
-      side: THREE.DoubleSide,
-    });
-    const lightHousing = new THREE.Mesh(new THREE.BoxGeometry(10, 6.4, 1.3), housingMaterial);
-    const lightPlate = new THREE.Mesh(new THREE.BoxGeometry(8.6, 4.6, 0.55), housingMaterial);
+    const lightHousing = new THREE.Mesh(new THREE.BoxGeometry(11.6, 4.8, 1.35), housingMaterial);
+    const lightPlate = new THREE.Mesh(new THREE.BoxGeometry(10.2, 3.1, 0.55), housingMaterial);
 
-    lightGroup.position.set(0, 13.8, 2.2);
+    lightGroup.position.set(0, 13.7, 2.4);
     lightGroup.rotation.y = Math.PI;
     lightGroup.add(lightHousing, lightPlate);
 
-    const bulbGeometry = new THREE.BoxGeometry(1.25, 1.25, 0.3);
+    const bulbHousingGeometry = new THREE.CylinderGeometry(1.08, 1.08, 0.34, 20);
     const bulbOffsets = [-2.8, -1.4, 0, 1.4, 2.8];
+    const bulbs = [];
+    const bulbLights = [];
     bulbOffsets.forEach((offsetX) => {
-      const bulb = new THREE.Mesh(bulbGeometry, activeMaterial.clone());
-      bulb.position.set(offsetX, 0, 0.44);
+      const bulbHousing = new THREE.Mesh(
+        bulbHousingGeometry,
+        new THREE.MeshStandardMaterial({
+          color: 0x250b0d,
+          emissive: 0x3d1114,
+          emissiveIntensity: 0.05,
+          roughness: 0.4,
+          flatShading: true,
+          side: THREE.DoubleSide,
+        }),
+      );
+      bulbHousing.rotation.x = Math.PI / 2;
+      bulbHousing.position.set(offsetX, 0, 0.52);
+
+      const bulb = new THREE.Mesh(
+        new THREE.CylinderGeometry(0.72, 0.72, 0.22, 16),
+        new THREE.MeshStandardMaterial({
+          color: 0x3c1214,
+          emissive: 0x4a1216,
+          emissiveIntensity: 0.08,
+          roughness: 0.28,
+          flatShading: true,
+          side: THREE.DoubleSide,
+        }),
+      );
+      bulb.rotation.x = Math.PI / 2;
+      bulb.position.set(offsetX, 0, 0.74);
+      const bulbLight = new THREE.PointLight(0xff5b3f, 0, 7, 2.2);
+      bulbLight.position.set(offsetX, 0, 1.0);
+
+      lightGroup.add(bulbHousing);
+      bulbs.push(bulb);
+      bulbLights.push(bulbLight);
+      lightGroup.add(bulbLight);
       lightGroup.add(bulb);
     });
 
     gate.add(lightGroup);
     gate.userData.startLights = lightGroup;
+    gate.userData.startBulbs = bulbs;
+    gate.userData.startBulbLights = bulbLights;
   }
 
   gate.userData.beam = beam;
@@ -768,6 +832,7 @@ const state = {
 const raceState = {
   phase: "staged",
   raceStart: 0,
+  countdownStart: 0,
   elapsedMs: 0,
   startSegmentIndex: 10,
   finishSegmentIndex: 0,
@@ -779,6 +844,9 @@ const MAX_SPEED_MPH = 180;
 const MAX_FORWARD_SPEED = 360;
 const MAX_REVERSE_SPEED = -90;
 const SPEED_TO_MPH = MAX_SPEED_MPH / MAX_FORWARD_SPEED;
+const START_LIGHT_COUNT = 5;
+const START_LIGHT_INTERVAL_MS = 420;
+const START_LIGHT_HOLD_MS = 540;
 const SKID_MARK_LIFETIME = 4.5;
 const FRONT_AXLE_POINT = new THREE.Vector3(0, 0, 8.4);
 const REAR_AXLE_POINT = new THREE.Vector3(0, 0, -6.5);
@@ -899,7 +967,7 @@ function getSurfaceHeightAt(x, z, currentHeight = null, previousSectionIndex = n
 function getCarCollisionExtent(normal) {
   const forward = new THREE.Vector2(Math.cos(state.angle), Math.sin(state.angle));
   const right = new THREE.Vector2(-forward.y, forward.x);
-  return Math.abs(normal.dot(right)) * CAR_HALF_WIDTH + Math.abs(normal.dot(forward)) * CAR_HALF_LENGTH;
+  return Math.abs(normal.dot(right)) * CAR_COLLISION_HALF_WIDTH + Math.abs(normal.dot(forward)) * CAR_COLLISION_HALF_LENGTH;
 }
 
 function getJumpMeta(surfaceInfo) {
@@ -942,6 +1010,115 @@ function formatTime(milliseconds) {
   const seconds = Math.floor((totalMilliseconds % 60000) / 1000);
   const millis = totalMilliseconds % 1000;
   return `${minutes.toString().padStart(2, "0")}:${seconds.toString().padStart(2, "0")}.${millis.toString().padStart(3, "0")}`;
+}
+
+function loadLeaderboardEntries() {
+  try {
+    const storedValue = localStorage.getItem(LEADERBOARD_STORAGE_KEY);
+    if (!storedValue) {
+      return DEFAULT_LEADERBOARD.slice();
+    }
+
+    const parsed = JSON.parse(storedValue);
+    if (!Array.isArray(parsed)) {
+      return DEFAULT_LEADERBOARD.slice();
+    }
+
+    return parsed
+      .filter((entry) => entry && typeof entry.username === "string" && Number.isFinite(entry.time))
+      .sort((left, right) => left.time - right.time)
+      .slice(0, 8);
+  } catch {
+    return DEFAULT_LEADERBOARD.slice();
+  }
+}
+
+function saveLeaderboardEntries(entries) {
+  localStorage.setItem(LEADERBOARD_STORAGE_KEY, JSON.stringify(entries));
+}
+
+let leaderboardEntries = loadLeaderboardEntries();
+let pendingSaveTime = null;
+
+function renderLeaderboard() {
+  leaderboardList.innerHTML = "";
+
+  if (leaderboardEntries.length === 0) {
+    const emptyRow = document.createElement("li");
+    emptyRow.className = "leaderboard-empty";
+    emptyRow.textContent = "No times yet. Be the first one down the desert track.";
+    leaderboardList.appendChild(emptyRow);
+    return;
+  }
+
+  leaderboardEntries.forEach((entry, index) => {
+    const row = document.createElement("li");
+    row.className = "leaderboard-entry";
+    row.innerHTML = `
+      <span class="leaderboard-entry__rank">${index + 1}</span>
+      <span class="leaderboard-entry__name">${entry.username}</span>
+      <span class="leaderboard-entry__time">${formatTime(entry.time)}</span>
+    `;
+    leaderboardList.appendChild(row);
+  });
+}
+
+function addLeaderboardEntry(username, time) {
+  leaderboardEntries = [...leaderboardEntries, { username, time }]
+    .sort((left, right) => left.time - right.time)
+    .slice(0, 8);
+  saveLeaderboardEntries(leaderboardEntries);
+  renderLeaderboard();
+}
+
+function showHomeView() {
+  menuScreen.classList.remove("is-hidden");
+  homeView.classList.remove("is-hidden");
+  detailView.classList.add("is-hidden");
+  hudOverlay.classList.remove("is-visible");
+}
+
+function showDetailView() {
+  menuScreen.classList.remove("is-hidden");
+  homeView.classList.add("is-hidden");
+  detailView.classList.remove("is-hidden");
+  renderLeaderboard();
+  hudOverlay.classList.remove("is-visible");
+}
+
+function hideSaveModal() {
+  saveModal.classList.add("is-hidden");
+  saveModal.setAttribute("aria-hidden", "true");
+  saveModalActions.classList.remove("is-hidden");
+  saveForm.classList.add("is-hidden");
+  saveForm.reset();
+  pendingSaveTime = null;
+}
+
+function openSaveModal(time) {
+  pendingSaveTime = time;
+  saveModalTitle.textContent = `Add ${formatTime(time)}?`;
+  saveModalBody.textContent = "Do you want to add your time to the leaderboard?";
+  saveModal.classList.remove("is-hidden");
+  saveModal.setAttribute("aria-hidden", "false");
+  saveModalActions.classList.remove("is-hidden");
+  saveForm.classList.add("is-hidden");
+  usernameInput.value = localStorage.getItem(LAST_USERNAME_STORAGE_KEY) || "";
+}
+
+function showUsernameForm() {
+  saveModalBody.textContent = "Enter a username to add your time.";
+  saveModalActions.classList.add("is-hidden");
+  saveForm.classList.remove("is-hidden");
+  usernameInput.focus();
+  usernameInput.select();
+}
+
+function closeRaceAndReturnToMenu() {
+  resetCar();
+  resetRaceState();
+  hideSaveModal();
+  showDetailView();
 }
 
 function getSectionForward(section, segmentIndex, windowSize = 8) {
@@ -1059,11 +1236,42 @@ function findSegmentIndexByDistance(targetDistance) {
 function resetRaceState() {
   raceState.phase = "staged";
   raceState.raceStart = 0;
+  raceState.countdownStart = 0;
   raceState.elapsedMs = 0;
   raceState.lastProgressDistance = 0;
   raceState.startedPastLine = false;
   timerValue.textContent = formatTime(0);
-  statusValue.textContent = "Press P to start the run.";
+  statusValue.textContent = `Press Start to begin ${TRACK_DATA.name}.`;
+  setStartLightStage(0);
+}
+
+function setStartLightStage(stage) {
+  const bulbs = startGate.userData.startBulbs || [];
+  const bulbLights = startGate.userData.startBulbLights || [];
+  const isGreenFlash = stage === "green";
+  const activeCount = isGreenFlash ? bulbs.length : THREE.MathUtils.clamp(stage, 0, bulbs.length);
+  bulbs.forEach((bulb, index) => {
+    const lit = index < activeCount;
+    const color = isGreenFlash && lit ? 0x43ff78 : 0xff4d2e;
+    const emissive = isGreenFlash && lit ? 0x62ff95 : 0xff6b3d;
+    bulb.material.color.set(lit ? color : 0x3c1214);
+    bulb.material.emissive.set(lit ? emissive : 0x4a1216);
+    bulb.material.emissiveIntensity = lit ? (isGreenFlash ? 1.7 : 1.45) : 0.08;
+    bulbLights[index].color.set(lit ? color : 0xff5b3f);
+    bulbLights[index].intensity = lit ? (isGreenFlash ? 2.4 : 1.9) : 0;
+  });
+}
+
+function beginCountdown(now) {
+  raceState.phase = "countdown";
+  raceState.countdownStart = now;
+  raceState.elapsedMs = 0;
+  raceState.lastProgressDistance = 0;
+  statusValue.textContent = "Get ready.";
+  setStartLightStage(0);
+  menuScreen.classList.add("is-hidden");
+  hudOverlay.classList.add("is-visible");
+  hideSaveModal();
 }
 
 function beginRace(now) {
@@ -1072,11 +1280,16 @@ function beginRace(now) {
   raceState.elapsedMs = 0;
   raceState.lastProgressDistance = 0;
   statusValue.textContent = "Go.";
+  setStartLightStage(0);
+  menuScreen.classList.add("is-hidden");
+  hudOverlay.classList.add("is-visible");
+  hideSaveModal();
 }
 
 function finishRace() {
   raceState.phase = "finished";
   statusValue.textContent = `Finished in ${formatTime(raceState.elapsedMs)}. Press R to reset.`;
+  openSaveModal(raceState.elapsedMs);
 }
 
 function getTrackProgressDistance(x, z) {
@@ -1496,6 +1709,24 @@ function updateCamera(deltaTime) {
 }
 
 function updateRace(now) {
+  if (raceState.phase === "countdown") {
+    const elapsed = now - raceState.countdownStart;
+    const redStage = Math.min(START_LIGHT_COUNT, Math.floor(elapsed / START_LIGHT_INTERVAL_MS) + 1);
+    const redSequenceDuration = START_LIGHT_COUNT * START_LIGHT_INTERVAL_MS;
+
+    if (elapsed < redSequenceDuration) {
+      setStartLightStage(redStage);
+      statusValue.textContent = "Lights.";
+    } else {
+      setStartLightStage("green");
+      statusValue.textContent = "Go.";
+    }
+
+    if (elapsed >= redSequenceDuration + START_LIGHT_HOLD_MS) {
+      beginRace(now);
+    }
+  }
+
   if (raceState.phase === "racing") {
     raceState.elapsedMs = now - raceState.raceStart;
     timerValue.textContent = formatTime(raceState.elapsedMs);
@@ -1534,9 +1765,6 @@ function loop(now) {
 window.addEventListener("resize", resize);
 window.addEventListener("keydown", (event) => {
   keys.add(event.code);
-  if (event.code === "KeyP" && raceState.phase === "staged") {
-    beginRace(performance.now());
-  }
   if (event.code === "KeyR") {
     resetCar();
     resetRaceState();
@@ -1544,6 +1772,47 @@ window.addEventListener("keydown", (event) => {
 });
 window.addEventListener("keyup", (event) => {
   keys.delete(event.code);
+});
+
+trackCardButton.addEventListener("click", () => {
+  showDetailView();
+});
+
+backButton.addEventListener("click", () => {
+  showHomeView();
+});
+
+startRaceButton.addEventListener("click", () => {
+  if (raceState.phase === "staged") {
+    beginCountdown(performance.now());
+  }
+});
+
+saveYesButton.addEventListener("click", () => {
+  showUsernameForm();
+});
+
+saveNoButton.addEventListener("click", () => {
+  closeRaceAndReturnToMenu();
+});
+
+saveCancelButton.addEventListener("click", () => {
+  closeRaceAndReturnToMenu();
+});
+
+saveForm.addEventListener("submit", (event) => {
+  event.preventDefault();
+  const username = usernameInput.value.trim();
+
+  if (!username) {
+    usernameInput.focus();
+    return;
+  }
+
+  leaderboardEntries = leaderboardEntries.slice();
+  addLeaderboardEntry(username, pendingSaveTime ?? raceState.elapsedMs);
+  localStorage.setItem(LAST_USERNAME_STORAGE_KEY, username);
+  closeRaceAndReturnToMenu();
 });
 
 resize();
@@ -1555,4 +1824,6 @@ raceState.finishSegmentIndex = findSegmentIndexByDistance(
 placeGate(startGate, raceState.startSegmentIndex, getStartGateRotation());
 placeGate(finishGate, raceState.finishSegmentIndex, getFinishGateRotation());
 resetRaceState();
+renderLeaderboard();
+showHomeView();
 requestAnimationFrame(loop);
